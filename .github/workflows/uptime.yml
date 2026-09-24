@@ -14,7 +14,7 @@ jobs:
         name: check sites
         run: |
           fail=""
-          for u in https://ohmyeat.com/ https://hayani.kr/ https://akaiz.com/ https://rooms.akaiz.com/ https://studio.akaiz.com/studio/ https://waiv.akaiz.com/; do
+          for u in https://ohmyeat.com/ https://hayani.kr/ https://akaiz.com/ https://rooms.akaiz.com/ https://studio.akaiz.com/studio/ https://waiv.akaiz.com/ https://ohmyeat.com/auth/v1/health; do
             code=$(curl -s -o /dev/null -w '%{http_code}' -m 20 --retry 2 --retry-delay 15 --retry-all-errors "$u" || true)
             case "$code" in 2??|3??|401) echo "ok   $code $u" ;; *) echo "DOWN $code $u"; fail="$fail $u($code)" ;; esac   # studio는 열쇠 잠금이라 401이 정상
           done
