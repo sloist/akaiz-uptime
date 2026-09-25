@@ -12,13 +12,21 @@ jobs:
     steps:
       - id: c
         name: check sites
-        run: |
-          fail=""
-          for u in https://ohmyeat.com/ https://hayani.kr/ https://akaiz.com/ https://rooms.akaiz.com/ https://studio.akaiz.com/studio/ https://waiv.akaiz.com/ https://ohmyeat.com/auth/v1/health; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' -m 20 --retry 2 --retry-delay 15 --retry-all-errors "$u" || true)
-            case "$code" in 2??|3??|401) echo "ok   $code $u" ;; *) echo "DOWN $code $u"; fail="$fail $u($code)" ;; esac   # studio는 열쇠 잠금이라 401이 정상
-          done
-          echo "fail=$fail" >> "$GITHUB_OUTPUT"
+        timeout-minutes: 2
+        run: |   # 감사 F11 · F12(2026-09-25): 주소마다 기대 코드를 따로(studio 만 401), 한꺼번에 두드려 서버가 통째로 멎어도 1분 안에 판정
+          check() { local want=$1 u=$2 code; code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 --retry 1 --retry-delay 5 --retry-all-errors "$u" || true)
+            [ "$code" = "$want" ] && echo "ok   $code $u" || echo "DOWN $code:want$want $u"; }
+          n=0; while read -r want u; do n=$((n+1)); check "$want" "$u" > "r.$n" & done <<'L'
+          200 https://ohmyeat.com/
+          200 https://ohmyeat.com/auth/v1/health
+          200 https://hayani.kr/ko
+          200 https://akaiz.com/
+          200 https://rooms.akaiz.com/
+          401 https://studio.akaiz.com/studio/
+          200 https://waiv.akaiz.com/
+          L
+          wait; cat r.*
+          echo "fail=$(grep -h '^DOWN' r.* | awk '{print $NF"("$2")"}' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
       - name: open or close the down issue
         env: { GH_TOKEN: '${{ github.token }}', FAIL: '${{ steps.c.outputs.fail }}' }
         run: |
@@ -49,3 +57,8 @@ jobs:
           fi
       - if: steps.c.outputs.fail != ''
         run: exit 1
+      - name: the check itself broke
+        if: failure() && steps.c.outputs.fail == ''
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |   # 감사 F11: 판정 단계가 기한 초과 · 오류로 끝나면 결과가 없다 — 그것도 down 으로 알린다
+          [ -n "$(gh issue list -R "$GITHUB_REPOSITORY" -l down -s open --json number -q '.[0].number')" ] || gh issue create -R "$GITHUB_REPOSITORY" -l down -t "감시가 판정을 못 냄" -b "$(date -u) — ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
