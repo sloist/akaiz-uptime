@@ -25,6 +25,22 @@ jobs:
           open=$(gh issue list -R "$GITHUB_REPOSITORY" -l down -s open --json number -q '.[0].number')
           if [ -n "$FAIL" ] && [ -z "$open" ]; then gh issue create -R "$GITHUB_REPOSITORY" -l down -t "사이트 응답 없음:$FAIL" -b "$(date -u) 확인. 서버: ssh -i ~/.ssh/rooms.pem ubuntu@54.116.235.217 → systemctl status caddy ohmyeat hayani marchive munsu"; fi
           if [ -z "$FAIL" ] && [ -n "$open" ]; then gh issue close "$open" -R "$GITHUB_REPOSITORY" -c "$(date -u) 복구됨"; fi
+      - name: ohmyeat scheduled jobs (server timers since 2026-09-25)
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |   # 서버가 적는 ohmyeat.com/jobs-status.json — 실패했거나 주기의 1.5배 + 2시간 넘게 소식이 없으면 이슈 하나(label jobs)
+          bad=$(curl -fsS -m 20 --retry 2 https://ohmyeat.com/jobs-status.json | jq -r '
+            to_entries[] | select(.value.ok != true or (now - (.value.at | fromdateiso8601)) > (.value.everyHours * 5400 + 7200))
+            | "\(.key)(\(if .value.ok != true then "실패" else "멈춤" end))"' | tr '\n' ' ') || bad="jobs-status.json 못 읽음"
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" -l jobs -s open --json number -q '.[0].number')
+          if [ -n "$bad" ] && [ -z "$open" ]; then gh issue create -R "$GITHUB_REPOSITORY" -l jobs -t "오마잇 예약 작업 이상: $bad" -b "$(date -u) 확인. 서버: ssh -i ~/.ssh/rooms.pem ubuntu@54.116.235.217 → ohmyeat-job status · journalctl -u 'ohmyeat-job@*' · /var/lib/ohmyeat-jobs/runs/"; fi
+          if [ -z "$bad" ] && [ -n "$open" ]; then gh issue close "$open" -R "$GITHUB_REPOSITORY" -c "$(date -u) 모두 정상"; fi
+      - name: monthly and quarterly data reminders
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |   # 옛 goodeats remind-kfind · remind-drugs — 매달 1일 09:00 KST K-FIND, 1 · 4 · 7 · 10월 1일 약(e약은요 · DUR)
+          [ "$(TZ=Asia/Seoul date +%d%H)" = "0109" ] && [ "$(date -u +%M)" -lt 10 ] || exit 0
+          h=$(curl -fsS -m 20 https://ohmyeat.com/api/health)
+          gh issue create -R "$GITHUB_REPOSITORY" -l remind -t "K-FIND 월간 갱신 확인 ($(TZ=Asia/Seoul date +%Y-%m))" -b "지금 식품 데이터 날짜: $(echo "$h" | jq -r '.dataDate.foods // "?"'). 새 공개분이 있으면 goodeats 에서 적재."
+          case "$(TZ=Asia/Seoul date +%m)" in 01|04|07|10) gh issue create -R "$GITHUB_REPOSITORY" -l remind -t "약 데이터 분기 갱신 ($(TZ=Asia/Seoul date +%Y-%m))" -b "지금 약 데이터 날짜: $(echo "$h" | jq -r '.dataDate.drugs // "?"'). goodeats 서버에서 refresh:drugs." ;; esac
       - name: keep the schedule alive
         run: |   # 공개 저장소는 60일 동안 커밋이 없으면 예약 실행이 꺼진다 — 매달 1일 한 줄
           if [ "$(date -u +%d%H)" = "0100" ] && [ "$(date -u +%M)" -lt 10 ]; then
