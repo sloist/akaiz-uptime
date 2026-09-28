@@ -1,4 +1,4 @@
-# 10분마다 사이트 여섯 곳을 두드린다. 죽으면 "down" 이슈를 열고(→ dev@akaiz.com으로 알림 메일), 살아나면 닫는다. 2026-09-24
+# 10분마다 공개 사이트·API·사진 업로드 인증 경계를 확인한다. 죽으면 "down" 이슈를 열고(→ dev@akaiz.com으로 알림 메일), 살아나면 닫는다. 2026-09-24
 name: uptime
 on:
   schedule: [{ cron: '*/10 * * * *' }]
@@ -18,6 +18,7 @@ jobs:
             [ "$code" = "$want" ] && echo "ok   $code $u" || echo "DOWN $code:want$want $u"; }
           n=0; while read -r want u; do n=$((n+1)); check "$want" "$u" > "r.$n" & done <<'L'
           200 https://ohmyeat.com/
+          200 https://ohmyeat.com/api/health
           200 https://ohmyeat.com/auth/v1/health
           200 https://hayani.kr/ko
           200 https://akaiz.com/
@@ -25,6 +26,13 @@ jobs:
           401 https://studio.akaiz.com/studio/
           200 https://waiv.akaiz.com/
           L
+          # Empty unauthenticated request; the storage handler must reject before any write.
+          n=$((n+1))
+          (
+            u=https://ohmyeat.com/storage/v1/object/posts/ops-health-probe
+            code=$(curl -s -X POST --data '' -o /dev/null -w '%{http_code}' -m 15 "$u" || true)
+            case "$code" in 401|403) echo "ok   $code $u" ;; *) echo "DOWN $code:want401/403 $u" ;; esac
+          ) > "r.$n" &
           wait; cat r.*
           echo "fail=$(grep -h '^DOWN' r.* | awk '{print $NF"("$2")"}' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
       - name: open or close the down issue
