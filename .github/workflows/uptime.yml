@@ -20,7 +20,7 @@ jobs:
           200 https://ohmyeat.com/
           200 https://ohmyeat.com/api/health
           200 https://ohmyeat.com/auth/v1/health
-          200 https://hayani.kr/ko
+          200 https://hayani.kr/
           200 https://akaiz.com/
           200 https://rooms.akaiz.com/
           401 https://studio.akaiz.com/studio/
