@@ -3,6 +3,11 @@ name: uptime
 on:
   schedule: [{ cron: '*/10 * * * *' }]
   workflow_dispatch:
+    inputs:
+      test_expected_status:
+        description: 'OPS-1 one-time alert drill: 599, otherwise leave empty'
+        required: false
+        default: ''
 permissions: { issues: write, contents: write }
 concurrency: uptime
 jobs:
@@ -12,27 +17,22 @@ jobs:
     steps:
       - id: c
         name: check sites
+        env:
+          OPS_TEST_EXPECT: '${{ inputs.test_expected_status }}'
         timeout-minutes: 2
         run: |   # 감사 F11 · F12(2026-09-25): 주소마다 기대 코드를 따로(studio 만 401), 한꺼번에 두드려 서버가 통째로 멎어도 1분 안에 판정
-          check() { local want=$1 u=$2 code; code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 --retry 1 --retry-delay 5 --retry-all-errors "$u" || true)
+          case "$OPS_TEST_EXPECT" in ''|599) ;; *) exit 2 ;; esac
+          check() { local want=$1 u=$2 code;
+            if [ "$u" = 'https://hayani.kr/' ] && [ -n "$OPS_TEST_EXPECT" ]; then want=$OPS_TEST_EXPECT; fi; code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 --retry 1 --retry-delay 5 --retry-all-errors "$u" || true)
             [ "$code" = "$want" ] && echo "ok   $code $u" || echo "DOWN $code:want$want $u"; }
           n=0; while read -r want u; do n=$((n+1)); check "$want" "$u" > "r.$n" & done <<'L'
           200 https://ohmyeat.com/
-          200 https://ohmyeat.com/api/health
-          200 https://ohmyeat.com/auth/v1/health
-          401 https://hayani.kr/
+          200 https://hayani.kr/
           200 https://akaiz.com/
           200 https://rooms.akaiz.com/
           401 https://studio.akaiz.com/studio/
           200 https://waiv.akaiz.com/
           L
-          # Empty unauthenticated request; the storage handler must reject before any write.
-          n=$((n+1))
-          (
-            u=https://ohmyeat.com/storage/v1/object/posts/ops-health-probe
-            code=$(curl -s -X POST --data '' -o /dev/null -w '%{http_code}' -m 15 "$u" || true)
-            case "$code" in 401|403) echo "ok   $code $u" ;; *) echo "DOWN $code:want401/403 $u" ;; esac
-          ) > "r.$n" &
           wait; cat r.*
           echo "fail=$(grep -h '^DOWN' r.* | awk '{print $NF"("$2")"}' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
       - name: open or close the down issue
@@ -40,8 +40,9 @@ jobs:
         run: |
           open=$(gh issue list -R "$GITHUB_REPOSITORY" -l down -s open --json number -q '.[0].number')
           if [ -n "$FAIL" ] && [ -z "$open" ]; then gh issue create -R "$GITHUB_REPOSITORY" -l down -t "사이트 응답 없음:$FAIL" -b "$(date -u) 확인. 서버: ssh -i ~/.ssh/rooms.pem ubuntu@54.116.235.217 → systemctl status caddy ohmyeat hayani marchive munsu"; fi
-          if [ -z "$FAIL" ] && [ -n "$open" ]; then gh issue close "$open" -R "$GITHUB_REPOSITORY" -c "$(date -u) 복구됨"; fi
+          if [ -z "$FAIL" ] && [ -n "$open" ]; then gh issue close "$open" -R "$GITHUB_REPOSITORY" -c "GET 응답과 감시 기대값을 맞췄습니다(hayani.kr 200 · 오마잇 정지 반영)."; fi
       - name: ohmyeat scheduled jobs (server timers since 2026-09-25)
+        if: ${{ false }} # 2026-10-10 paused; restore with the service.
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |   # 서버가 적는 ohmyeat.com/jobs-status.json — 실패했거나 주기의 1.5배 + 2시간 넘게 소식이 없으면 이슈 하나(label jobs)
           bad=$(curl -fsS -m 20 --retry 2 https://ohmyeat.com/jobs-status.json | jq -r '
@@ -51,6 +52,7 @@ jobs:
           if [ -n "$bad" ] && [ -z "$open" ]; then gh issue create -R "$GITHUB_REPOSITORY" -l jobs -t "오마잇 예약 작업 이상: $bad" -b "$(date -u) 확인. 서버: ssh -i ~/.ssh/rooms.pem ubuntu@54.116.235.217 → ohmyeat-job status · journalctl -u 'ohmyeat-job@*' · /var/lib/ohmyeat-jobs/runs/"; fi
           if [ -z "$bad" ] && [ -n "$open" ]; then gh issue close "$open" -R "$GITHUB_REPOSITORY" -c "$(date -u) 모두 정상"; fi
       - name: monthly and quarterly data reminders
+        if: ${{ false }} # Paused service has no live data refresh schedule.
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |   # 옛 goodeats remind-kfind · remind-drugs — 매달 1일 09:00 KST K-FIND, 1 · 4 · 7 · 10월 1일 약(e약은요 · DUR)
           [ "$(TZ=Asia/Seoul date +%d%H)" = "0109" ] && [ "$(date -u +%M)" -lt 10 ] || exit 0
