@@ -8,6 +8,11 @@ on:
         description: 'OPS-1 one-time alert drill: 599, otherwise leave empty'
         required: false
         default: ''
+      check_only:
+        description: 'Run checks without issue changes or notifications'
+        type: boolean
+        required: false
+        default: false
 permissions: { issues: write, contents: write }
 concurrency: uptime
 jobs:
@@ -32,10 +37,13 @@ jobs:
           200 https://rooms.akaiz.com/
           401 https://studio.akaiz.com/studio/
           200 https://waiv.akaiz.com/
+          200 https://hayanis.com/
+          200 https://eedeum.com/
           L
           wait; cat r.*
           echo "fail=$(grep -h '^DOWN' r.* | awk '{print $NF"("$2")"}' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
       - name: open or close the down issue
+        if: ${{ !inputs.check_only }}
         env: { GH_TOKEN: '${{ github.token }}', FAIL: '${{ steps.c.outputs.fail }}' }
         run: |
           open=$(gh issue list -R "$GITHUB_REPOSITORY" -l down -s open --json number -q '.[0].number')
@@ -60,6 +68,7 @@ jobs:
           gh issue create -R "$GITHUB_REPOSITORY" -l remind -t "K-FIND 월간 갱신 확인 ($(TZ=Asia/Seoul date +%Y-%m))" -b "지금 식품 데이터 날짜: $(echo "$h" | jq -r '.dataDate.foods // "?"'). 새 공개분이 있으면 goodeats 에서 적재."
           case "$(TZ=Asia/Seoul date +%m)" in 01|04|07|10) gh issue create -R "$GITHUB_REPOSITORY" -l remind -t "약 데이터 분기 갱신 ($(TZ=Asia/Seoul date +%Y-%m))" -b "지금 약 데이터 날짜: $(echo "$h" | jq -r '.dataDate.drugs // "?"'). goodeats 서버에서 refresh:drugs." ;; esac
       - name: keep the schedule alive
+        if: ${{ !inputs.check_only }}
         run: |   # 공개 저장소는 60일 동안 커밋이 없으면 예약 실행이 꺼진다 — 매달 1일 한 줄
           if [ "$(date -u +%d%H)" = "0100" ] && [ "$(date -u +%M)" -lt 10 ]; then
             git clone -q "https://x-access-token:${{ github.token }}@github.com/$GITHUB_REPOSITORY" r && cd r && date -u > .alive && git add .alive
@@ -68,7 +77,7 @@ jobs:
       - if: steps.c.outputs.fail != ''
         run: exit 1
       - name: the check itself broke
-        if: failure() && steps.c.outputs.fail == ''
+        if: failure() && steps.c.outputs.fail == '' && !inputs.check_only
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |   # 감사 F11: 판정 단계가 기한 초과 · 오류로 끝나면 결과가 없다 — 그것도 down 으로 알린다
           [ -n "$(gh issue list -R "$GITHUB_REPOSITORY" -l down -s open --json number -q '.[0].number')" ] || gh issue create -R "$GITHUB_REPOSITORY" -l down -t "감시가 판정을 못 냄" -b "$(date -u) — ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
